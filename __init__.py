@@ -88,7 +88,7 @@ def client_thread(id):
         data=(getch_buffer(id,timeout=300))
         if data==False:
             rem_id(id)
-            print("client",id,"disconnected")
+            print("Client",id,"Disconnected")
             exit()
         else:
             is_dict=dict_able(data)
@@ -327,4 +327,4 @@ def node(addr,client_handler):
     thread(target=recvr_thread,args=(client_handler,)).start()
     thread(target=writer).start()
 if __name__=="__main__":
-    node(("0.0.0.0",port),lambda x:print(x.id,"has connected"))
+    node(("0.0.0.0",port),lambda x:print("Client with",x.id,"has Connected"))
