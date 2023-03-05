@@ -2,7 +2,7 @@
 ## Basic Usage
 Echo Server
 ```python
-from node import *
+from udp import *
 def client_thread(conn):
     print("Client with id",conn.id,"has connected")
     def echo(conn,data):
@@ -12,7 +12,7 @@ node(("127.0.0.1",1),client_thread)
 ```
 Client
 ```python
-from node import *
+from udp import *
 def client_thread(conn):
     print("Client with id",conn.id,"has connected")
     def echo(conn,data):
