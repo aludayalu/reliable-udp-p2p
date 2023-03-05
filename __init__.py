@@ -183,7 +183,7 @@ def msg_processor(data,addr,client_handler):
         id=get_id()
         connections[id]=addr
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
-        memory[addr]["conn_obj"]=connection(addr)
+        memory[addr]["conn_obj"]=connection_class(addr)
         memory[addr]["thread"].start()
         server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
         thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
@@ -191,7 +191,7 @@ def msg_processor(data,addr,client_handler):
         id=get_id()
         connections[id]=addr
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
-        memory[addr]["conn_obj"]=connection(addr)
+        memory[addr]["conn_obj"]=connection_class(addr)
         memory[addr]["thread"].start()
         thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
@@ -223,7 +223,7 @@ def writer():
                 thread(target=reliable_send,args=(connections[_key_],x["write"][0])).start()
                 del readable_buffer[_key_]["write"][0]
 
-def connect(addr):
+def connection(addr):
     if addr in memory:
         return memory[addr]["conn_obj"]
     else:
@@ -267,7 +267,7 @@ def connection_listener(conn):
             traceback.print_exc()
             continue
 
-class connection:
+class connection_class:
     def __init__(self,addr):
         self.id=get_connection(addr)
         if str(self.id)==str(False):

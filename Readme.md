@@ -19,7 +19,7 @@ def client_thread(conn):
         print(data.data)
     conn.link_event("echo",echo)
 node(("0.0.0.0",7777),client_thread)
-conn=connect(("127.0.0.1",1))
+conn=connection(("127.0.0.1",1))
 def sender():
     while True:
         conn.send("echo",input(">> "))
