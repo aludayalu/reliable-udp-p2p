@@ -1,4 +1,4 @@
-import time,socket,json,random,sys,re,threading
+import time,socket,json,uuid,sys,re,threading
 from textwrap import wrap
 regex_trgt=("."*48000)+"?"
 try:
@@ -182,16 +182,18 @@ def msg_processor(data,addr,client_handler):
     elif event=="sync" and addr not in connections.values():
         id=get_id()
         connections[id]=addr
-        memory[addr]={"buffer":[],"id":id,"thread":thread(target=client_thread,args=(id,))}
+        memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
+        memory[addr]["conn_obj"]=connection(addr)
         memory[addr]["thread"].start()
         server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
-        thread(target=client_handler,args=(connection(addr),)).start()
+        thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
     elif event=="accept" and addr not in connections.values():
         id=get_id()
         connections[id]=addr
-        memory[addr]={"buffer":[],"id":id,"thread":thread(target=client_thread,args=(id,))}
+        memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
+        memory[addr]["conn_obj"]=connection(addr)
         memory[addr]["thread"].start()
-        thread(target=client_handler,args=(connection(addr),)).start()
+        thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
     elif addr in connections.values():
         memory[addr]["buffer"].append(json.dumps(data))
@@ -221,19 +223,71 @@ def writer():
                 thread(target=reliable_send,args=(connections[_key_],x["write"][0])).start()
                 del readable_buffer[_key_]["write"][0]
 
+def connect(addr):
+    if addr in memory:
+        return memory[addr]["conn_obj"]
+    else:
+        if str(get_connection(addr))==str(False):
+            return False
+        return memory[addr]["conn_obj"]
+
+class msg:
+    def __init__(self,event,data,uid) -> None:
+        self.event=event
+        self.data=data
+        self.uid=uid
+
+class socket_wrapper:
+    def __init__(self,recv_,send_):
+        def recv():
+            try:
+                data=json.loads(recv_())
+                return msg(data["event"],data["data"],data["uid"])
+            except:
+                import traceback
+                traceback.print_exc()
+                return recv()
+        self.recv=recv
+        self.send=send_
+
+def connection_listener(conn):
+    while True:
+        data=conn.recv()
+        if data==False:
+            return
+        try:
+            data=json.loads(data)
+            if type(data)==type({}) and "event" in data and "data" in data and "uid" in data:
+                if data["event"] in conn.events:
+                    _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
+                    if data!=None and data!=False:
+                        conn.events[data["event"]](socket_wrapper(conn.recv,conn.send),_data_)
+        except:
+            import traceback
+            traceback.print_exc()
+            continue
+
 class connection:
     def __init__(self,addr):
         self.id=get_connection(addr)
         if str(self.id)==str(False):
             raise Exception("Unable to connect")
-    def send(self,data):
+        self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
+        thread(target=connection_listener,args=(self,)).start()
+    def send(self,event,data,uid=None):
         global readable_buffer
         if self.id not in connections:
             return False
+        if uid==None:
+            uid=str(uuid.uuid4())
         if type(data) in [type(""),type([]),type(1),type(1.0),type({})]:
-            data=json.dumps(data)
+            pass
+        else:
+            return False
+        data=json.dumps({"event":event,"data":data,"uid":uid})
         readable_buffer[self.id]["write"].append(data)
     def recv(self):
+        time.sleep(0.001)
         global readable_buffer
         if self.id not in connections:
             return False
@@ -243,6 +297,17 @@ class connection:
         res=readable_buffer[self.id]["read"][0]
         del readable_buffer[self.id]["read"][0]
         return res
+    def link_event(self,event,func):
+        if self.id not in connections:
+            return False
+        self.events[event]=func
+    def unlink_event(self,event,func):
+        if self.id not in connections:
+            return False
+        try:
+            del self.events[event]
+        except:
+            return False
 
 def get_connection(addr:tuple):
     if addr in memory:
