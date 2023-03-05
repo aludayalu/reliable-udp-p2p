@@ -1,12 +1,10 @@
 import time,socket,json,random,sys,re,threading
 from textwrap import wrap
 regex_trgt=("."*48000)+"?"
-server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 try:
     port=int(sys.argv[1])
 except:
     port=7777
-server.bind(("0.0.0.0",port))
 
 connections={}
 memory={}
@@ -36,9 +34,10 @@ def make_msg(data):
     return data
 
 def rem_id(id):
-    global connections,memory
+    global connections,memory,readable_buffer
     del memory[connections[id]]
     del connections[id]
+    del readable_buffer[id]
 
 def required_keys(dict,ins_set):
     for key in ins_set:
@@ -77,7 +76,7 @@ def ping(addr):
 def client_thread(id):
     thread(target=ping,args=(connections[id],)).start()
     global acks,readable_buffer
-    readable_buffer[id]=[]
+    readable_buffer[id]={"read":[],"write":[]}
     data_recvd=[]
     recv_ids=[]
     transfer_mode=False
@@ -120,8 +119,7 @@ def client_thread(id):
                         if recvd_==to_recv:
                             transfer_mode=False
                             current_id=""
-                            readable_buffer[id].append("".join(data_recvd))
-                            print(readable_buffer)
+                            readable_buffer[id]["read"].append("".join(data_recvd))
                 if required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send" and not transfer_mode and data["id"] in recv_ids:
                     server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                 if required_keys(data,{"event":"","data":"","id":1}) and data["event"]=="ack" and data["id"] in acks:
@@ -146,7 +144,17 @@ def reliable_send(addr,data):
             iters=0
         else:
             iters+=1
+    iters=0
+    last_state=acks[id]["acks"]
     while True:
+        current_state=acks[id]["acks"]
+        if current_state==last_state:
+            iters+=1
+        else:
+            iters=0
+        if iters>300:
+            return False
+        last_state=acks[id]["acks"]
         next_iter=False
         for x in range(len(data)):
             if x not in acks[id]["acks"]:
@@ -157,10 +165,11 @@ def reliable_send(addr,data):
             continue
         else:
             break
+    return True
 
 temp_mem={}
 
-def msg_processor(data,addr):
+def msg_processor(data,addr,client_handler):
     try:
         data=json.loads(data)
         assert type(data["event"])==type("")
@@ -168,57 +177,89 @@ def msg_processor(data,addr):
         event=data["event"]
     except:
         return
-    if event=="sync" and addr not in connections.values():
+    if event=="sync" and addr in connections.values():
+        server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
+    elif event=="sync" and addr not in connections.values():
         id=get_id()
         connections[id]=addr
         memory[addr]={"buffer":[],"id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["thread"].start()
         server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
-        print("Client with id",id,"Connected")
-    if event=="accept" and addr not in connections.values():
+        thread(target=client_handler,args=(connection(addr),)).start()
+    elif event=="accept" and addr not in connections.values():
         id=get_id()
         connections[id]=addr
         memory[addr]={"buffer":[],"id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["thread"].start()
-        print("Client with id",id,"Connected")
+        thread(target=client_handler,args=(connection(addr),)).start()
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
     elif addr in connections.values():
         memory[addr]["buffer"].append(json.dumps(data))
 
-def temp_memory_msg_handler(data,addr):
-    global temp_mem
-    if addr not in temp_mem:
-        temp_mem[addr]=b""
-    temp_mem[addr]+=data
-    if len(data)>=52000:
-        msg_processor(data[:52000],addr)
-        temp_mem[addr]=temp_mem[addr][52000:]
-
-def recvr_thread():
-    global connections,memory
+def recvr_thread(client_handler):
+    global connections,memory,temp_mem
     while True:
         try:
             data,addr=server.recvfrom(52000)
         except:
             continue
-        temp_memory_msg_handler(data,addr)
+        if addr not in temp_mem:
+            temp_mem[addr]=b""
+        temp_mem[addr]+=data
+        if len(data)>=52000:
+            msg_processor(data[:52000],addr,client_handler)
+            temp_mem[addr]=temp_mem[addr][52000:]
 
-def sender():
-    global connections,memory
+def writer():
+    global readable_buffer
     while True:
-        data=input(">> ")
-        if data=="add":
-            try:
-                inp_=input("ip:addr >> ").split(":")
-                ip_addr=(inp_[0],int(inp_[1]))
-                server.sendto(make_msg(json.dumps({"event":"sync","data":""})).encode(),ip_addr)
-                print("Connection request sent")
-            except:
-                import traceback
-                traceback.print_exc()
-                print("Could not connect to IP:ADDR combination")
-        else:
-            reliable_send(list(memory.keys())[0],eval(data))
+        time.sleep(0.01)
+        for x in readable_buffer:
+            _key_=x
+            x=readable_buffer[x]
+            if x["write"]!=[]:
+                thread(target=reliable_send,args=(connections[_key_],x["write"][0])).start()
+                del readable_buffer[_key_]["write"][0]
 
-thread(target=recvr_thread).start()
-thread(target=sender).start()
+class connection:
+    def __init__(self,addr):
+        self.id=get_connection(addr)
+        if str(self.id)==str(False):
+            raise Exception("Unable to connect")
+    def send(self,data):
+        global readable_buffer
+        if self.id not in connections:
+            return False
+        if type(data) in [type(""),type([]),type(1),type(1.0),type({})]:
+            data=json.dumps(data)
+        readable_buffer[self.id]["write"].append(data)
+    def recv(self):
+        global readable_buffer
+        if self.id not in connections:
+            return False
+        while readable_buffer[self.id]["read"]==[]:
+            time.sleep(0.01)
+            pass
+        res=readable_buffer[self.id]["read"][0]
+        del readable_buffer[self.id]["read"][0]
+        return res
+
+def get_connection(addr:tuple):
+    if addr in memory:
+        return memory[addr]["id"]
+    server.sendto(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
+    for x in range(30):
+        if addr in memory:
+            return memory[addr]["id"]
+        time.sleep(0.1)
+        server.sendto(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
+    return False
+
+def node(addr,client_handler):
+    global server
+    server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    server.bind(addr)
+    thread(target=recvr_thread,args=(client_handler,)).start()
+    thread(target=writer).start()
+if __name__=="__main__":
+    node(("0.0.0.0",port),lambda x:print(x.id,"has connected"))
