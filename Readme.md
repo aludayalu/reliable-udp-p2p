@@ -5,7 +5,7 @@ Echo Server
 from udp import *
 def client_thread(conn):
     print("Client with id",conn.id,"has connected")
-    def echo(conn,data):
+    def echo(data,conn):
         conn.send(data.event,data.data)
     conn.link_event("echo",echo)
 node(("127.0.0.1",1),client_thread)
@@ -15,7 +15,7 @@ Client
 from udp import *
 def client_thread(conn):
     print("Client with id",conn.id,"has connected")
-    def echo(conn,data):
+    def echo(data,conn):
         print(data.data)
     conn.link_event("echo",echo)
 node(("0.0.0.0",7777),client_thread)
