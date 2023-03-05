@@ -69,7 +69,7 @@ def dict_able(data):
         return False,False
 
 def ping(addr):
-    while True:
+    while addr in memory:
         time.sleep(0.25)
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
@@ -260,7 +260,7 @@ def connection_listener(conn):
             if type(data)==type({}) and "event" in data and "data" in data and "uid" in data:
                 if data["event"] in conn.events:
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
-                    if data!=None and data!=False:
+                    if _data_!=None and _data_!=False:
                         conn.events[data["event"]](_data_,socket_wrapper(conn.recv,conn.send))
         except:
             import traceback
@@ -291,9 +291,12 @@ class connection_class:
         global readable_buffer
         if self.id not in connections:
             return False
-        while readable_buffer[self.id]["read"]==[]:
-            time.sleep(0.01)
-            pass
+        try:
+            while readable_buffer[self.id]["read"]==[]:
+                time.sleep(0.01)
+                pass
+        except:
+            self.close()
         res=readable_buffer[self.id]["read"][0]
         del readable_buffer[self.id]["read"][0]
         return res
@@ -308,6 +311,8 @@ class connection_class:
             del self.events[event]
         except:
             return False
+    def close(self):
+        raise Exception("Connection Closed")
 
 def get_connection(addr:tuple):
     if addr in memory:
