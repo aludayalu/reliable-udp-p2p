@@ -1,6 +1,5 @@
-import time,socket,json,uuid,sys,re,threading
-from textwrap import wrap
-regex_trgt=("."*48000)+"?"
+import time,socket,json,uuid,sys,threading
+from itertools import zip_longest
 try:
     port=int(sys.argv[1])
 except:
@@ -20,6 +19,17 @@ def get_id():
         i+=1
         if i not in connections:
             return i
+
+def grouper(iterable, n, fillvalue=None):
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=fillvalue)
+
+def data_splitter(data,n):
+    resp=list(grouper(data,n))
+    out=[]
+    for x in resp:
+        out.append("".join([y for y in x if y!=None]))
+    return out
 
 def get_next_uid():
     global last_uid
@@ -126,12 +136,7 @@ def client_thread(id):
                     acks[data["id"]]["acks"].append(int(data["data"].split("ack,")[1]))
 
 def reliable_send(addr,data):
-    def get_data(x_data):
-        if len(x_data)<=48000:
-            return [x_data]
-        else:
-            return  re.findall(regex_trgt,data)
-    data=get_data(data)
+    data=data_splitter(data,48000)
     global acks
     id=get_next_uid()
     acks[id]={"acks":[]}
@@ -257,14 +262,10 @@ def connection_listener(conn):
             return
         try:
             data=json.loads(data)
-            time.sleep(0.001)
             if type(data)==type({}) and "event" in data and "data" in data and "uid" in data:
-                time.sleep(0.001)
                 if data["event"] in conn.events:
-                    time.sleep(0.001)
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
                     if _data_!=None and _data_!=False:
-                        time.sleep(0.001)
                         conn.events[data["event"]](_data_,socket_wrapper(conn.recv,conn.send))
         except:
             import traceback
