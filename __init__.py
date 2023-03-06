@@ -257,10 +257,14 @@ def connection_listener(conn):
             return
         try:
             data=json.loads(data)
+            time.sleep(0.001)
             if type(data)==type({}) and "event" in data and "data" in data and "uid" in data:
+                time.sleep(0.001)
                 if data["event"] in conn.events:
+                    time.sleep(0.001)
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
                     if _data_!=None and _data_!=False:
+                        time.sleep(0.001)
                         conn.events[data["event"]](_data_,socket_wrapper(conn.recv,conn.send))
         except:
             import traceback
