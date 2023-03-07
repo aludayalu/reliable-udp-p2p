@@ -243,7 +243,7 @@ class msg:
         self.uid=uid
 
 class socket_wrapper:
-    def __init__(self,recv_,send_):
+    def __init__(self,recv_,send_,id):
         def recv():
             try:
                 data=json.loads(recv_())
@@ -254,6 +254,7 @@ class socket_wrapper:
                 return recv()
         self.recv=recv
         self.send=send_
+        self.id=id
 
 def connection_listener(conn):
     while True:
@@ -266,7 +267,7 @@ def connection_listener(conn):
                 if data["event"] in conn.events:
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
                     if _data_!=None and _data_!=False:
-                        conn.events[data["event"]](_data_,socket_wrapper(conn.recv,conn.send))
+                        conn.events[data["event"]](_data_,socket_wrapper(conn.recv,conn.send,conn.id))
         except:
             import traceback
             traceback.print_exc()
