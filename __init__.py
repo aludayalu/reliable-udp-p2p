@@ -84,9 +84,10 @@ def ping(addr):
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
 def client_thread(id):
-    thread(target=ping,args=(connections[id],)).start()
     global acks,readable_buffer
-    readable_buffer[id]={"read":[],"write":[]}
+    if id not in readable_buffer:
+        readable_buffer[id]={"read":[],"write":[]}
+    thread(target=ping,args=(connections[id],)).start()
     data_recvd=[]
     recv_ids=[]
     transfer_mode=False
@@ -291,6 +292,8 @@ class connection_class:
         else:
             return False
         data=json.dumps({"event":event,"data":data,"uid":uid})
+        if self.id not in readable_buffer:
+            readable_buffer[self.id]={"read":[],"write":[]}
         readable_buffer[self.id]["write"].append(data)
     def recv(self):
         time.sleep(0.001)
