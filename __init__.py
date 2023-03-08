@@ -183,7 +183,7 @@ def msg_processor(data,addr,client_handler):
     if event=="sync" and addr in connections.values():
         server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
     elif event=="sync" and addr not in connections.values():
-        id=get_id()
+        id=addr
         connections[id]=addr
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["conn_obj"]=connection_class(addr)
@@ -191,7 +191,7 @@ def msg_processor(data,addr,client_handler):
         server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
         thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
     elif event=="accept" and addr not in connections.values():
-        id=get_id()
+        id=addr
         connections[id]=addr
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["conn_obj"]=connection_class(addr)
