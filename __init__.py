@@ -242,7 +242,7 @@ class msg:
 
 def connection_listener(conn):
     while True:
-        data=conn.recv()
+        data=conn.recv(json_=False)
         if data==False:
             return
         try:
@@ -278,19 +278,29 @@ class connection_class:
         if self.id not in readable_buffer:
             readable_buffer[self.id]={"read":[],"write":[]}
         readable_buffer[self.id]["write"].append(data)
-    def recv(self):
+    def recv(self,json_=True):
         time.sleep(0.001)
         global readable_buffer
         if self.id not in connections:
             return False
-        try:
-            while readable_buffer[self.id]["read"]==[]:
-                time.sleep(0.01)
-                pass
-        except:
-            self.close()
-        res=readable_buffer[self.id]["read"][0]
-        del readable_buffer[self.id]["read"][0]
+        while True:
+            try:
+                while readable_buffer[self.id]["read"]==[]:
+                    time.sleep(0.01)
+                    pass
+            except:
+                self.close()
+            res=readable_buffer[self.id]["read"][0]
+            del readable_buffer[self.id]["read"][0]
+            if json_:
+                res_=dict_able(res)
+                if res_[0]:
+                    try:
+                        return msg(res_[1]["event"],res_[1]["data"],res_[1]["uid"])
+                    except:
+                        continue
+            else:
+                return res
         return res
     def link_event(self,event,func):
         if self.id not in connections:
