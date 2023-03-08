@@ -99,8 +99,7 @@ def client_thread(id):
         data=(getch_buffer(id,timeout=300))
         if data==False:
             rem_id(id)
-            print("Client",id,"Disconnected")
-            exit()
+            raise Exception("Connection Closed")
         else:
             is_dict=dict_able(data)
             if is_dict[0]:
@@ -321,6 +320,7 @@ class connection_class:
         except:
             return False
     def close(self):
+        self.events["close"](self)
         raise Exception("Connection Closed")
 
 def get_connection(addr:tuple):
