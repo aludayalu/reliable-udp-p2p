@@ -11,14 +11,12 @@ acks={}
 last_uid=0
 thread=threading.Thread
 readable_buffer={}
+counter=0
 
 def get_id():
-    global connections
-    i=-1
-    while True:
-        i+=1
-        if i not in connections:
-            return i
+    global counter
+    counter+=1
+    return counter
 
 def grouper(iterable, n, fillvalue=None):
     args = [iter(iterable)] * n
