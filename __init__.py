@@ -332,6 +332,11 @@ def get_connection(addr:tuple):
         server.sendto(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
     return False
 
+def clear_buffer(id,read=True,write=True):
+    global readable_buffer
+    if id in readable_buffer:
+        readable_buffer[id]={"read":[] if read else readable_buffer[id]["read"],"write":[] if write else readable_buffer[id]["write"]}
+
 def node(addr,client_handler):
     global server
     server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
