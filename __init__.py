@@ -240,20 +240,6 @@ class msg:
         self.data=data
         self.uid=uid
 
-class socket_wrapper:
-    def __init__(self,recv_,send_,id):
-        def recv():
-            try:
-                data=json.loads(recv_())
-                return msg(data["event"],data["data"],data["uid"])
-            except:
-                import traceback
-                traceback.print_exc()
-                return recv()
-        self.recv=recv
-        self.send=send_
-        self.id=id
-
 def connection_listener(conn):
     while True:
         data=conn.recv()
@@ -265,7 +251,7 @@ def connection_listener(conn):
                 if data["event"] in conn.events:
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
                     if _data_!=None and _data_!=False:
-                        conn.events[data["event"]](_data_,socket_wrapper(conn.recv,conn.send,conn.id))
+                        conn.events[data["event"]](_data_,conn)
         except:
             import traceback
             traceback.print_exc()
@@ -274,9 +260,9 @@ def connection_listener(conn):
 class connection_class:
     def __init__(self,addr):
         self.id=get_connection(addr)
-        if str(self.id)==str(False):
-            raise Exception("Unable to connect")
         self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
+        if str(self.id)==str(False):
+            self.close()
         thread(target=connection_listener,args=(self,)).start()
     def send(self,event,data,uid=None):
         global readable_buffer
