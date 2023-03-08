@@ -78,13 +78,13 @@ def dict_able(data):
 
 def ping(addr):
     while addr in memory:
-        time.sleep(0.25)
+        time.sleep(0.1)
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
 def client_thread(id):
     global acks,readable_buffer
     if id not in readable_buffer:
-        readable_buffer[id]={"read":[],"write":[]}
+        readable_buffer[id]={"read":[],"write":[],"connected":True}
     thread(target=ping,args=(connections[id],)).start()
     data_recvd=[]
     recv_ids=[]
@@ -93,11 +93,14 @@ def client_thread(id):
     current_id=""
     to_recv=0
     recvd_=0
-    while True:
-        data=(getch_buffer(id,timeout=300))
+    while readable_buffer[id]["connected"]:
+        try:
+            data=(getch_buffer(id,timeout=300))
+        except:
+            return
         if data==False:
             rem_id(id)
-            raise Exception("Connection Closed")
+            return
         else:
             is_dict=dict_able(data)
             if is_dict[0]:
@@ -132,6 +135,7 @@ def client_thread(id):
                     server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                 if required_keys(data,{"event":"","data":"","id":1}) and data["event"]=="ack" and data["id"] in acks:
                     acks[data["id"]]["acks"].append(int(data["data"].split("ack,")[1]))
+    return
 
 def reliable_send(addr,data):
     data=data_splitter(data,48000)
@@ -331,7 +335,7 @@ def get_connection(addr:tuple):
 def clear_buffer(id,read=True,write=True):
     global readable_buffer
     if id in readable_buffer:
-        readable_buffer[id]={"read":[] if read else readable_buffer[id]["read"],"write":[] if write else readable_buffer[id]["write"]}
+        readable_buffer[id]={"read":[] if read else readable_buffer[id]["read"],"write":[] if write else readable_buffer[id]["write"],"connected":True}
 
 def node(addr,client_handler):
     global server
