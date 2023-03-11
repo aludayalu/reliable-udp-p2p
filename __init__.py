@@ -282,12 +282,14 @@ def connection_listener(conn):
         except:
             import traceback
             traceback.print_exc()
+            conn.temp={}
             continue
 
 class connection_class:
     def __init__(self,addr):
         self.id=get_connection(addr)
         self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
+        self.temp={}
         if str(self.id)==str(False):
             self.close()
         thread(target=connection_listener,args=(self,)).start()
