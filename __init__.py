@@ -12,6 +12,7 @@ last_uid=0
 thread=threading.Thread
 readable_buffer={}
 counter=0
+debug_mode=False
 
 def get_id():
     global counter
@@ -60,6 +61,8 @@ def getch_buffer(id,timeout=None):
     if timeout!=None:
         iterations=0
     while len(memory[connections[id]]["buffer"])==0:
+        if readable_buffer[id]["connected"]==False:
+            return False
         time.sleep(0.01)
         if timeout!=None:
             iterations+=1
@@ -67,6 +70,8 @@ def getch_buffer(id,timeout=None):
                 return False
     resp=memory[connections[id]]["buffer"][0]
     memory[connections[id]]["buffer"].remove(memory[connections[id]]["buffer"][0])
+    if debug_mode:
+        print("Conman: Getch Buffer Return")
     return resp
 
 def dict_able(data):
@@ -78,7 +83,7 @@ def dict_able(data):
 
 def ping(addr):
     while addr in memory:
-        time.sleep(0.1)
+        time.sleep(0.3)
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
 def client_thread(id):
@@ -106,6 +111,8 @@ def client_thread(id):
             if is_dict[0]:
                 data=is_dict[1]
                 if required_keys(data,{"event":"","id":1,"packets":1}) and data["event"]=="send_req" and data["packets"]<1024000:
+                    if debug_mode:
+                        print("Conman: New send Request")
                     if not transfer_mode and data["id"] in recv_ids:
                         server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["id"])})).encode(),connections[id])
                     if transfer_mode and not recv_mode and current_id==data["id"]:
@@ -121,6 +128,8 @@ def client_thread(id):
                             recv_ids.remove(recv_ids[0])
                         server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
                 if transfer_mode and required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send":
+                    if debug_mode:
+                        print(f"Conman: Data packet {data['packet_i']} received")
                     if data["id"]!=current_id and data["id"] in recv_ids:
                         server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                     if data["id"]==current_id and data["packet_i"]<=to_recv and data_recvd[data["packet_i"]]==b"":
@@ -132,18 +141,26 @@ def client_thread(id):
                             current_id=""
                             readable_buffer[id]["read"].append("".join(data_recvd))
                 if required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send" and not transfer_mode and data["id"] in recv_ids:
+                    if debug_mode:
+                        print("Conman: Ack Sent")
                     server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                 if required_keys(data,{"event":"","data":"","id":1}) and data["event"]=="ack" and data["id"] in acks:
+                    if debug_mode:
+                        print("Conman: Ack Received")
                     acks[data["id"]]["acks"].append(int(data["data"].split("ack,")[1]))
     return
 
 def reliable_send(addr,data):
+    if debug_mode:
+        print("Conman: Data Send Request")
     data=data_splitter(data,48000)
     global acks
     id=get_next_uid()
     acks[id]={"acks":[]}
     server.sendto(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
     iters=0
+    if debug_mode:
+        print("Conman: Waiting For Ack")
     while acks[id]["acks"]==[]:
         time.sleep(0.001)
         if iters>10:
@@ -151,6 +168,8 @@ def reliable_send(addr,data):
             iters=0
         else:
             iters+=1
+    if debug_mode:
+        print("Conman: Initial Ack Received. Sending Data")
     iters=0
     last_state=acks[id]["acks"]
     while True:
@@ -172,6 +191,8 @@ def reliable_send(addr,data):
             continue
         else:
             break
+    if debug_mode:
+        print("Conman: All Data Sent")
     return True
 
 temp_mem={}
@@ -212,6 +233,8 @@ def recvr_thread(client_handler):
             data,addr=server.recvfrom(52000)
         except:
             continue
+        if debug_mode:
+            print(f"Conman: Got Data From Addr {addr}")
         if addr not in temp_mem:
             temp_mem[addr]=b""
         temp_mem[addr]+=data
@@ -300,12 +323,17 @@ class connection_class:
                 res_=dict_able(res)
                 if res_[0]:
                     try:
+                        if debug_mode:
+                            print(f"Conman: JSON {self.id} Returned")
                         return msg(res_[1]["event"],res_[1]["data"],res_[1]["uid"])
                     except:
+                        if debug_mode:
+                            print(f"Conman: Not Valid JSON {self.id} Continued")
                         continue
             else:
+                if debug_mode:
+                    print(f"Conman: Not JSON {self.id} Returned")
                 return res
-        return res
     def link_event(self,event,func):
         if self.id not in connections:
             return False
@@ -320,6 +348,11 @@ class connection_class:
     def close(self):
         self.events["close"](self)
         raise Exception("Connection Closed")
+
+def close(id):
+    global readable_buffer,memory
+    readable_buffer[id]["connected"]=False
+    memory[connection[id]]["conn_obj"].close()
 
 def get_connection(addr:tuple):
     if addr in memory:
