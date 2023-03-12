@@ -254,12 +254,16 @@ def writer():
     global readable_buffer
     while True:
         time.sleep(0.01)
-        for x in readable_buffer:
-            _key_=x
-            x=readable_buffer[x]
-            if x["write"]!=[]:
-                thread(target=reliable_send,args=(connections[_key_],x["write"][0])).start()
-                del readable_buffer[_key_]["write"][0]
+        for x in readable_buffer.copy():
+            try:
+                _key_=x
+                x=readable_buffer[x]
+                if x["write"]!=[]:
+                    thread(target=reliable_send,args=(connections[_key_],x["write"][0])).start()
+                    del readable_buffer[_key_]["write"][0]
+            except:
+                import traceback
+                traceback.print_exc()
 
 def connection(addr):
     if addr in memory:
