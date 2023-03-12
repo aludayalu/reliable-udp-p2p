@@ -17,6 +17,8 @@ status={}
 
 def send(data,addr,recursions=0):
     if recursions==10:
+        if debug_mode:
+            print("Conman: Unable to write buffer after 10 retries")
         return
     try:
         server.sendto(data,addr)
