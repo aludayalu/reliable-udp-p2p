@@ -321,7 +321,6 @@ class connection_class:
             raise Exception("Connection Closed")
         thread(target=connection_listener,args=(self,)).start()
     def send(self,event,data,uid=None):
-        self.last_activity=time.time()
         global readable_buffer
         if self.id not in connections:
             self.close()
@@ -336,7 +335,6 @@ class connection_class:
             readable_buffer[self.id]={"read":[],"write":[]}
         readable_buffer[self.id]["write"].append(data)
     def recv(self,json_=True):
-        self.last_activity=time.time()
         time.sleep(0.001)
         global readable_buffer
         if self.id not in connections:
