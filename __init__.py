@@ -1,4 +1,4 @@
-import time,socket,json,uuid,sys,threading
+import time,socket,json,uuid,sys,threading,traceback
 from itertools import zip_longest
 try:
     port=int(sys.argv[1])
@@ -14,6 +14,16 @@ readable_buffer={}
 counter=0
 debug_mode=False
 status={}
+
+def send(data,addr,recursions=0):
+    if recursions==10:
+        return
+    try:
+        server.sendto(data,addr)
+    except:
+        traceback.print_exc()
+        time.sleep(0.1)
+        send(data,addr,recursions+1)
 
 def get_id():
     global counter
@@ -88,7 +98,7 @@ def dict_able(data):
 def ping(addr):
     while addr in memory:
         time.sleep(0.3)
-        server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
+        send(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
 def client_thread(id):
     global acks,readable_buffer,status
@@ -118,9 +128,9 @@ def client_thread(id):
                     if debug_mode:
                         print("Conman: New send Request")
                     if not transfer_mode and data["id"] in recv_ids:
-                        server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["id"])})).encode(),connections[id])
+                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["id"])})).encode(),connections[id])
                     if transfer_mode and not recv_mode and current_id==data["id"]:
-                        server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
+                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
                     if not transfer_mode and data["id"] not in recv_ids:
                         transfer_mode=True
                         to_recv=data["packets"]
@@ -130,14 +140,14 @@ def client_thread(id):
                         recv_ids.append(current_id)
                         if len(recv_ids)>100:
                             recv_ids.remove(recv_ids[0])
-                        server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
+                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
                 if transfer_mode and required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send":
                     if debug_mode:
                         print(f"Conman: Data packet {data['packet_i']} received")
                     if data["id"]!=current_id and data["id"] in recv_ids:
-                        server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
+                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                     if data["id"]==current_id and data["packet_i"]<=to_recv and data_recvd[data["packet_i"]]==b"":
-                        server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
+                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                         data_recvd[data["packet_i"]]=data["data"]
                         recvd_+=1
                         if recvd_==to_recv:
@@ -147,7 +157,7 @@ def client_thread(id):
                 if required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send" and not transfer_mode and data["id"] in recv_ids:
                     if debug_mode:
                         print("Conman: Ack Sent")
-                    server.sendto(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
+                    send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                 if required_keys(data,{"event":"","data":"","id":1}) and data["event"]=="ack" and data["id"] in acks:
                     if debug_mode:
                         print("Conman: Ack Received")
@@ -162,14 +172,14 @@ def reliable_send(addr,data):
     global acks
     id=get_next_uid()
     acks[id]={"acks":[]}
-    server.sendto(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
+    send(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
     iters=0
     if debug_mode:
         print("Conman: Waiting For Ack")
     while status[addr]==True and acks[id]["acks"]==[]:
         time.sleep(0.001)
         if iters>10:
-            server.sendto(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
+            send(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
             iters=0
         else:
             iters+=1
@@ -192,7 +202,7 @@ def reliable_send(addr,data):
         for x in range(len(data)):
             if x not in acks[id]["acks"]:
                 next_iter=True
-                server.sendto(make_msg(json.dumps({"event":"data_send","packet_i":x,"id":id,"data":data[x]})).encode(),addr)
+                send(make_msg(json.dumps({"event":"data_send","packet_i":x,"id":id,"data":data[x]})).encode(),addr)
         if next_iter:
             time.sleep(0.01)
             continue
@@ -214,7 +224,7 @@ def msg_processor(data,addr,client_handler):
     except:
         return
     if event=="sync" and addr in connections.values():
-        server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
+        send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
     elif event=="sync" and addr not in connections.values():
         id=addr
         status[id]=True
@@ -222,7 +232,7 @@ def msg_processor(data,addr,client_handler):
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["conn_obj"]=connection_class(addr)
         memory[addr]["thread"].start()
-        server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
+        send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
         thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
     elif event=="accept" and addr not in connections.values():
         id=addr
@@ -232,7 +242,7 @@ def msg_processor(data,addr,client_handler):
         memory[addr]["conn_obj"]=connection_class(addr)
         memory[addr]["thread"].start()
         thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
-        server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
+        send(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
     elif addr in connections.values():
         memory[addr]["buffer"].append(json.dumps(data))
 
@@ -375,12 +385,12 @@ def close(id,del_=False):
 def get_connection(addr:tuple):
     if addr in memory:
         return memory[addr]["id"]
-    server.sendto(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
+    send(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
     for x in range(30):
         if addr in memory:
             return memory[addr]["id"]
         time.sleep(0.1)
-        server.sendto(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
+        send(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
     return False
 
 def clear_buffer(id,read=True,write=True):
