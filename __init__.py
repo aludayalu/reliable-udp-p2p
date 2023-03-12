@@ -144,10 +144,6 @@ def client_thread(id):
                             transfer_mode=False
                             current_id=""
                             readable_buffer[id]["read"].append("".join(data_recvd))
-                            try:
-                                del acks[data["id"]]
-                            except:
-                                pass
                 if required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send" and not transfer_mode and data["id"] in recv_ids:
                     if debug_mode:
                         print("Conman: Ack Sent")
