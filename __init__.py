@@ -247,8 +247,6 @@ def recvr_thread(client_handler):
             data,addr=server.recvfrom(52000)
         except:
             continue
-        if debug_mode:
-            print(f"Conman: Got Data From Addr {addr}")
         if addr not in temp_mem:
             temp_mem[addr]=b""
         temp_mem[addr]+=data
@@ -292,6 +290,8 @@ def connection_listener(conn):
                 if data["event"] in conn.events:
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
                     if _data_!=None and _data_!=False:
+                        if debug_mode:
+                            print("Conman: Triggering Event")
                         conn.events[data["event"]](_data_,conn)
         except:
             import traceback
