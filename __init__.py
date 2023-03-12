@@ -316,10 +316,12 @@ class connection_class:
         self.id=get_connection(addr)
         self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
         self.temp={}
+        self.last_activity=time.time()
         if str(self.id)==str(False):
             raise Exception("Connection Closed")
         thread(target=connection_listener,args=(self,)).start()
     def send(self,event,data,uid=None):
+        self.last_activity=time.time()
         global readable_buffer
         if self.id not in connections:
             self.close()
@@ -334,6 +336,7 @@ class connection_class:
             readable_buffer[self.id]={"read":[],"write":[]}
         readable_buffer[self.id]["write"].append(data)
     def recv(self,json_=True):
+        self.last_activity=time.time()
         time.sleep(0.001)
         global readable_buffer
         if self.id not in connections:
@@ -347,6 +350,7 @@ class connection_class:
                 self.close()
             res=readable_buffer[self.id]["read"][0]
             del readable_buffer[self.id]["read"][0]
+            self.last_activity=time.time()
             if json_:
                 res_=dict_able(res)
                 if res_[0]:
@@ -363,10 +367,12 @@ class connection_class:
                     print(f"Conman: Not JSON {self.id} Returned")
                 return res
     def link_event(self,event,func):
+        self.last_activity=time.time()
         if self.id not in connections:
             return False
         self.events[event]=func
     def unlink_event(self,event,func):
+        self.last_activity=time.time()
         if self.id not in connections:
             return False
         try:
@@ -374,6 +380,7 @@ class connection_class:
         except:
             return False
     def close(self):
+        self.last_activity=time.time()
         globals()["close"](self.id,True)
         self.events["close"](self)
         raise Exception("Connection Closed")
