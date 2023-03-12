@@ -13,6 +13,7 @@ thread=threading.Thread
 readable_buffer={}
 counter=0
 debug_mode=False
+status={}
 
 def get_id():
     global counter
@@ -57,21 +58,24 @@ def required_keys(dict,ins_set):
     return True
 
 def getch_buffer(id,timeout=None):
-    global memory
+    global memory,status
     if timeout!=None:
         iterations=0
-    while len(memory[connections[id]]["buffer"])==0:
-        if readable_buffer[id]["connected"]==False:
-            return False
-        time.sleep(0.01)
-        if timeout!=None:
-            iterations+=1
-            if iterations>timeout:
+    try:
+        while status[id] and len(memory[connections[id]]["buffer"])==0:
+            if readable_buffer[id]["connected"]==False:
                 return False
+            time.sleep(0.01)
+            if timeout!=None:
+                iterations+=1
+                if iterations>timeout:
+                    return False
+        if not status[id]:
+            return False
+    except:
+        return False
     resp=memory[connections[id]]["buffer"][0]
     memory[connections[id]]["buffer"].remove(memory[connections[id]]["buffer"][0])
-    if debug_mode:
-        print("Conman: Getch Buffer Return")
     return resp
 
 def dict_able(data):
@@ -87,9 +91,9 @@ def ping(addr):
         server.sendto(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
 def client_thread(id):
-    global acks,readable_buffer
+    global acks,readable_buffer,status
     if id not in readable_buffer:
-        readable_buffer[id]={"read":[],"write":[],"connected":True}
+        globals()['readable_buffer'][id]={"read":[],"write":[],"connected":True}
     thread(target=ping,args=(connections[id],)).start()
     data_recvd=[]
     recv_ids=[]
@@ -98,7 +102,7 @@ def client_thread(id):
     current_id=""
     to_recv=0
     recvd_=0
-    while readable_buffer[id]["connected"]:
+    while status[id]:
         try:
             data=(getch_buffer(id,timeout=300))
         except:
@@ -140,6 +144,10 @@ def client_thread(id):
                             transfer_mode=False
                             current_id=""
                             readable_buffer[id]["read"].append("".join(data_recvd))
+                            try:
+                                del acks[data["id"]]
+                            except:
+                                pass
                 if required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send" and not transfer_mode and data["id"] in recv_ids:
                     if debug_mode:
                         print("Conman: Ack Sent")
@@ -151,6 +159,7 @@ def client_thread(id):
     return
 
 def reliable_send(addr,data):
+    global status
     if debug_mode:
         print("Conman: Data Send Request")
     data=data_splitter(data,48000)
@@ -161,13 +170,15 @@ def reliable_send(addr,data):
     iters=0
     if debug_mode:
         print("Conman: Waiting For Ack")
-    while acks[id]["acks"]==[]:
+    while status[addr]==True and acks[id]["acks"]==[]:
         time.sleep(0.001)
         if iters>10:
             server.sendto(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
             iters=0
         else:
             iters+=1
+    if status[addr]==False:
+        return False
     if debug_mode:
         print("Conman: Initial Ack Received. Sending Data")
     iters=0
@@ -198,6 +209,7 @@ def reliable_send(addr,data):
 temp_mem={}
 
 def msg_processor(data,addr,client_handler):
+    global status
     try:
         data=json.loads(data)
         assert type(data["event"])==type("")
@@ -209,6 +221,7 @@ def msg_processor(data,addr,client_handler):
         server.sendto(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
     elif event=="sync" and addr not in connections.values():
         id=addr
+        status[id]=True
         connections[id]=addr
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["conn_obj"]=connection_class(addr)
@@ -218,6 +231,7 @@ def msg_processor(data,addr,client_handler):
     elif event=="accept" and addr not in connections.values():
         id=addr
         connections[id]=addr
+        status[id]=True
         memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
         memory[addr]["conn_obj"]=connection_class(addr)
         memory[addr]["thread"].start()
@@ -291,12 +305,12 @@ class connection_class:
         self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
         self.temp={}
         if str(self.id)==str(False):
-            self.close()
+            raise Exception("Connection Closed")
         thread(target=connection_listener,args=(self,)).start()
     def send(self,event,data,uid=None):
         global readable_buffer
         if self.id not in connections:
-            return False
+            self.close()
         if uid==None:
             uid=str(uuid.uuid4())
         if type(data) in [type(""),type([]),type(1),type(1.0),type({})]:
@@ -311,7 +325,7 @@ class connection_class:
         time.sleep(0.001)
         global readable_buffer
         if self.id not in connections:
-            return False
+            self.close()
         while True:
             try:
                 while readable_buffer[self.id]["read"]==[]:
@@ -348,13 +362,15 @@ class connection_class:
         except:
             return False
     def close(self):
+        globals()["close"](self.id,True)
         self.events["close"](self)
         raise Exception("Connection Closed")
 
-def close(id):
-    global readable_buffer,memory
-    readable_buffer[id]["connected"]=False
-    memory[connection[id]]["conn_obj"].close()
+def close(id,del_=False):
+    global status
+    status[id]=False
+    if del_:
+        del status[id]
 
 def get_connection(addr:tuple):
     if addr in memory:
