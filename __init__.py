@@ -291,7 +291,7 @@ def connection_listener(conn):
                     _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
                     if _data_!=None and _data_!=False:
                         if debug_mode:
-                            print("Conman: Triggering Event")
+                            print(f"Conman: Triggering Event {data['event']}")
                         conn.events[data["event"]](_data_,conn)
         except:
             import traceback
