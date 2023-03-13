@@ -367,12 +367,10 @@ class connection_class:
                     print(f"Conman: Not JSON {self.id} Returned")
                 return res
     def link_event(self,event,func):
-        self.last_activity=time.time()
         if self.id not in connections:
             return False
         self.events[event]=func
     def unlink_event(self,event,func):
-        self.last_activity=time.time()
         if self.id not in connections:
             return False
         try:
@@ -380,7 +378,6 @@ class connection_class:
         except:
             return False
     def close(self):
-        self.last_activity=time.time()
         globals()["close"](self.id,True)
         self.events["close"](self)
         raise Exception("Connection Closed")
