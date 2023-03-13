@@ -51,8 +51,8 @@ def get_next_uid():
     return last_uid
 
 def make_msg(data):
-    if len(data)<52000:
-        data=data+" "*(52000-len(data))
+    if len(data)<9216:
+        data=data+" "*(9216-len(data))
     return data
 
 def rem_id(id):
@@ -99,7 +99,7 @@ def dict_able(data):
 
 def ping(addr):
     while addr in memory:
-        time.sleep(0.3)
+        time.sleep(0.1)
         send(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
 
 def client_thread(id):
@@ -126,7 +126,7 @@ def client_thread(id):
             is_dict=dict_able(data)
             if is_dict[0]:
                 data=is_dict[1]
-                if required_keys(data,{"event":"","id":1,"packets":1}) and data["event"]=="send_req" and data["packets"]<1024000:
+                if required_keys(data,{"event":"","id":1,"packets":1}) and data["event"]=="send_req" and data["packets"]<10240000:
                     if debug_mode:
                         print("Conman: New send Request")
                     if not transfer_mode and data["id"] in recv_ids:
@@ -170,7 +170,7 @@ def reliable_send(addr,data):
     global status
     if debug_mode:
         print("Conman: Data Send Request")
-    data=data_splitter(data,48000)
+    data=data_splitter(data,9000)
     global acks
     id=get_next_uid()
     acks[id]={"acks":[]}
@@ -254,15 +254,15 @@ def recvr_thread(client_handler):
     global connections,memory,temp_mem
     while True:
         try:
-            data,addr=server.recvfrom(52000)
+            data,addr=server.recvfrom(9216)
         except:
             continue
         if addr not in temp_mem:
             temp_mem[addr]=b""
         temp_mem[addr]+=data
-        if len(data)>=52000:
-            msg_processor(data[:52000],addr,client_handler)
-            temp_mem[addr]=temp_mem[addr][52000:]
+        if len(data)>=9216:
+            msg_processor(data[:9216],addr,client_handler)
+            temp_mem[addr]=temp_mem[addr][9216:]
 
 def writer():
     global readable_buffer
