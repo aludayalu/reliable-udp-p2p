@@ -227,6 +227,8 @@ def msg_processor(data,addr,client_handler):
         return
     if event=="sync" and addr in connections.values():
         send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
+    elif event=="sync" and addr in connections.values():
+        send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
     elif event=="sync" and addr not in connections.values():
         id=addr
         status[id]=True
