@@ -296,6 +296,7 @@ class msg:
 def connection_listener(conn):
     while True:
         data=conn.recv(json_=False)
+        conn.free=False
         if data==False:
             return
         try:
@@ -307,10 +308,12 @@ def connection_listener(conn):
                         if debug_mode:
                             print(f"Conman: Triggering Event {data['event']}")
                         conn.events[data["event"]](_data_,conn)
+            conn.free=True
         except:
             import traceback
             traceback.print_exc()
             conn.temp={}
+            conn.free=True
             continue
 
 class connection_class:
@@ -319,6 +322,7 @@ class connection_class:
         self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
         self.temp={}
         self.last_activity=time.time()
+        self.free=True
         if str(self.id)==str(False):
             raise Exception("Connection Closed")
         thread(target=connection_listener,args=(self,)).start()
