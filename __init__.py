@@ -1,4 +1,6 @@
-import time,socket,json,uuid,sys,threading,traceback
+import time,socket,json,uuid,sys,threading,traceback,logging
+logfile = 'bin/error.log'
+logging.basicConfig(filename=logfile, level=logging.ERROR)
 from itertools import zip_longest
 try:
     port=int(sys.argv[1])
@@ -23,7 +25,7 @@ def send(data,addr,recursions=0):
     try:
         server.sendto(data,addr)
     except:
-        traceback.print_exc()
+        logging.exception("Error caught");traceback.print_exc()
         time.sleep(0.1)
         send(data,addr,recursions+1)
 
@@ -85,6 +87,7 @@ def getch_buffer(id,timeout=None):
         if not status[id]:
             return False
     except:
+        logging.exception("Error caught");traceback.print_exc()
         return False
     resp=memory[connections[id]]["buffer"][0]
     memory[connections[id]]["buffer"].remove(memory[connections[id]]["buffer"][0])
@@ -114,10 +117,12 @@ def client_thread(id):
     current_id=""
     to_recv=0
     recvd_=0
+    last_packet_current_id=0
     while status[id]:
         try:
             data=(getch_buffer(id,timeout=300))
         except:
+            logging.exception("Error caught");traceback.print_exc()
             return
         if data==False:
             rem_id(id)
@@ -127,6 +132,9 @@ def client_thread(id):
             if is_dict[0]:
                 data=is_dict[1]
                 if required_keys(data,{"event":"","id":1,"packets":1}) and data["event"]=="send_req" and data["packets"]<10240000:
+                    if (time.time()-last_packet_current_id)>1:
+                        transfer_mode=False
+                        current_id=""
                     if debug_mode:
                         print("Conman: New send Request")
                     if not transfer_mode and data["id"] in recv_ids:
@@ -134,6 +142,7 @@ def client_thread(id):
                     if transfer_mode and not recv_mode and current_id==data["id"]:
                         send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
                     if not transfer_mode and data["id"] not in recv_ids:
+                        last_packet_current_id=time.time()
                         transfer_mode=True
                         to_recv=data["packets"]
                         recvd_=0
@@ -149,6 +158,7 @@ def client_thread(id):
                     if data["id"]!=current_id and data["id"] in recv_ids:
                         send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                     if data["id"]==current_id and data["packet_i"]<=to_recv and data_recvd[data["packet_i"]]==b"":
+                        last_packet_current_id=time.time()
                         send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
                         data_recvd[data["packet_i"]]=data["data"]
                         recvd_+=1
@@ -168,6 +178,8 @@ def client_thread(id):
 
 def reliable_send(addr,data):
     global status
+    if addr not in status:
+        status[addr]=True
     if debug_mode:
         print("Conman: Data Send Request")
     data=data_splitter(data,9000)
@@ -273,11 +285,13 @@ def writer():
                 _key_=x
                 x=readable_buffer[x]
                 if x["write"]!=[]:
-                    thread(target=reliable_send,args=(connections[_key_],x["write"][0])).start()
+                    try:
+                        reliable_send(connections[_key_],x["write"][0])
+                    except:
+                        logging.exception("Error caught");traceback.print_exc()
                     del readable_buffer[_key_]["write"][0]
             except:
-                import traceback
-                traceback.print_exc()
+                logging.exception("Error caught");traceback.print_exc()
 
 def connection(addr):
     if addr in memory:
@@ -310,8 +324,7 @@ def connection_listener(conn):
                         conn.events[data["event"]](_data_,conn)
             conn.free=True
         except:
-            import traceback
-            traceback.print_exc()
+            logging.exception("Error caught");traceback.print_exc()
             conn.temp={}
             conn.free=True
             continue
@@ -340,6 +353,9 @@ class connection_class:
         if self.id not in readable_buffer:
             readable_buffer[self.id]={"read":[],"write":[]}
         readable_buffer[self.id]["write"].append(data)
+        while data in readable_buffer[self.id]:
+            time.sleep(0.01)
+        return
     def recv(self,json_=True):
         time.sleep(0.001)
         global readable_buffer
@@ -351,6 +367,7 @@ class connection_class:
                     time.sleep(0.01)
                     pass
             except:
+                logging.exception("Error caught");traceback.print_exc()
                 self.close()
             res=readable_buffer[self.id]["read"][0]
             del readable_buffer[self.id]["read"][0]
