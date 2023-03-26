@@ -1,38 +1,24 @@
-import time,socket,json,uuid,sys,threading,traceback,logging
-logfile = 'bin/error.log'
-logging.basicConfig(filename=logfile, level=logging.ERROR)
+import socket,sys,json,time,threading
 from itertools import zip_longest
-try:
-    port=int(sys.argv[1])
-except:
-    port=7777
+server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 
 connections={}
-memory={}
-acks={}
-last_uid=0
-thread=threading.Thread
-readable_buffer={}
-counter=0
-debug_mode=False
-status={}
-
-def send(data,addr,recursions=0):
-    if recursions>10:
-        if debug_mode:
-            print("Conman: Unable to write buffer after 10 retries")
-        return
-    try:
-        server.sendto(data,addr)
-    except:
-        logging.exception("Error caught");traceback.print_exc()
-        time.sleep(0.1)
-        send(data,addr,recursions+1)
+transmission_ids=0
 
 def get_id():
-    global counter
-    counter+=1
-    return counter
+    global transmission_ids
+    transmission_ids+=1
+    return transmission_ids
+
+def package_data(data):
+    if type(data)==type(""):
+        data=data.encode()
+    if len(data)<63527:
+        data+=b" "*(63527-len(data))
+    return data
+
+def package_event_data(event,data):
+    return package_data(json.dumps({"event":event,"data":data}).encode())
 
 def grouper(iterable, n, fillvalue=None):
     args = [iter(iterable)] * n
@@ -45,394 +31,168 @@ def data_splitter(data,n):
         out.append("".join([y for y in x if y!=None]))
     return out
 
-def get_next_uid():
-    global last_uid
-    if last_uid>1000000:
-        last_uid=0
-    last_uid+=1
-    return last_uid
-
-def make_msg(data):
-    if len(data)<9216:
-        data=data+" "*(9216-len(data))
-    return data
-
-def rem_id(id):
-    global connections,memory,readable_buffer
-    del memory[connections[id]]
-    del connections[id]
-    del readable_buffer[id]
-
-def required_keys(dict,ins_set):
-    for key in ins_set:
-        if key not in dict:
-            return False
-        if type(ins_set[key])!=type(dict[key]):
-            return False
-    return True
-
-def getch_buffer(id,timeout=None):
-    global memory,status
-    if timeout!=None:
-        iterations=0
-    try:
-        while status[id] and len(memory[connections[id]]["buffer"])==0:
-            if readable_buffer[id]["connected"]==False:
-                return False
-            time.sleep(0.01)
-            if timeout!=None:
-                iterations+=1
-                if iterations>timeout:
-                    return False
-        if not status[id]:
-            return False
-    except:
-        logging.exception("Error caught");traceback.print_exc()
-        return False
-    resp=memory[connections[id]]["buffer"][0]
-    memory[connections[id]]["buffer"].remove(memory[connections[id]]["buffer"][0])
-    return resp
-
-def dict_able(data):
-    try:
-        res=True,json.loads(data)
-        return res
-    except:
-        return False,False
-
-def ping(addr):
-    while addr in memory:
-        time.sleep(0.1)
-        send(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
-
-def client_thread(id):
-    global acks,readable_buffer,status
-    if id not in readable_buffer:
-        globals()['readable_buffer'][id]={"read":[],"write":[],"connected":True}
-    thread(target=ping,args=(connections[id],)).start()
-    data_recvd=[]
-    recv_ids=[]
-    transfer_mode=False
-    recv_mode=False
-    current_id=""
-    to_recv=0
-    recvd_=0
-    last_packet_current_id=0
-    while status[id]:
-        try:
-            data=(getch_buffer(id,timeout=300))
-        except:
-            logging.exception("Error caught");traceback.print_exc()
-            return
-        if data==False:
-            rem_id(id)
-            return
-        else:
-            is_dict=dict_able(data)
-            if is_dict[0]:
-                data=is_dict[1]
-                if required_keys(data,{"event":"","id":1,"packets":1}) and data["event"]=="send_req" and data["packets"]<10240000:
-                    if (time.time()-last_packet_current_id)>1:
-                        transfer_mode=False
-                        current_id=""
-                    if debug_mode:
-                        print("Conman: New send Request")
-                    if not transfer_mode and data["id"] in recv_ids:
-                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["id"])})).encode(),connections[id])
-                    if transfer_mode and not recv_mode and current_id==data["id"]:
-                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
-                    if not transfer_mode and data["id"] not in recv_ids:
-                        last_packet_current_id=time.time()
-                        transfer_mode=True
-                        to_recv=data["packets"]
-                        recvd_=0
-                        data_recvd=[b""]*to_recv
-                        current_id=data["id"]
-                        recv_ids.append(current_id)
-                        if len(recv_ids)>100:
-                            recv_ids.remove(recv_ids[0])
-                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,-1"})).encode(),connections[id])
-                if transfer_mode and required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send":
-                    if debug_mode:
-                        print(f"Conman: Data packet {data['packet_i']} received")
-                    if data["id"]!=current_id and data["id"] in recv_ids:
-                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
-                    if data["id"]==current_id and data["packet_i"]<=to_recv and data_recvd[data["packet_i"]]==b"":
-                        last_packet_current_id=time.time()
-                        send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
-                        data_recvd[data["packet_i"]]=data["data"]
-                        recvd_+=1
-                        if recvd_==to_recv:
-                            transfer_mode=False
-                            current_id=""
-                            readable_buffer[id]["read"].append("".join(data_recvd))
-                if required_keys(data,{"event":"","packet_i":1,"data":"","id":1}) and data["event"]=="data_send" and not transfer_mode and data["id"] in recv_ids:
-                    if debug_mode:
-                        print("Conman: Ack Sent")
-                    send(make_msg(json.dumps({"event":"ack","id":data["id"],"data":"ack,"+str(data["packet_i"])})).encode(),connections[id])
-                if required_keys(data,{"event":"","data":"","id":1}) and data["event"]=="ack" and data["id"] in acks:
-                    if debug_mode:
-                        print("Conman: Ack Received")
-                    acks[data["id"]]["acks"].append(int(data["data"].split("ack,")[1]))
-    return
-
-def reliable_send(addr,data):
-    global status
-    if addr not in status:
-        status[addr]=True
-    if debug_mode:
-        print("Conman: Data Send Request")
-    data=data_splitter(data,9000)
-    global acks
-    id=get_next_uid()
-    acks[id]={"acks":[]}
-    send(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
-    iters=0
-    if debug_mode:
-        print("Conman: Waiting For Ack")
-    while status[addr]==True and acks[id]["acks"]==[]:
-        time.sleep(0.001)
-        if iters>10:
-            send(make_msg(json.dumps({"event":"send_req","packets":len(data),"id":id,"data":""})).encode(),addr)
-            iters=0
-        else:
-            iters+=1
-    if status[addr]==False:
-        return False
-    if debug_mode:
-        print("Conman: Initial Ack Received. Sending Data")
-    iters=0
-    last_state=acks[id]["acks"]
-    while True:
-        current_state=acks[id]["acks"]
-        if current_state==last_state:
-            iters+=1
-        else:
-            iters=0
-        if iters>300:
-            return False
-        last_state=acks[id]["acks"]
-        next_iter=False
-        for x in range(len(data)):
-            if x not in acks[id]["acks"]:
-                next_iter=True
-                send(make_msg(json.dumps({"event":"data_send","packet_i":x,"id":id,"data":data[x]})).encode(),addr)
-        if next_iter:
-            time.sleep(0.01)
-            continue
-        else:
-            break
-    if debug_mode:
-        print("Conman: All Data Sent")
-    return True
-
-temp_mem={}
-
-def msg_processor(data,addr,client_handler):
-    global status
-    try:
-        data=json.loads(data)
-        assert type(data["event"])==type("")
-        assert type(data["data"]) in [type(1),type(1.0),type(""),type([]),type({})]
-        event=data["event"]
-    except:
-        return
-    if event=="sync" and addr in connections.values():
-        send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
-    elif event=="sync" and addr in connections.values():
-        send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
-    elif event=="sync" and addr not in connections.values():
-        id=addr
-        status[id]=True
-        connections[id]=addr
-        memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
-        memory[addr]["conn_obj"]=connection_class(addr)
-        memory[addr]["thread"].start()
-        send(make_msg(json.dumps({"event":"accept","data":""})).encode(),addr)
-        thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
-    elif event=="accept" and addr not in connections.values():
-        id=addr
-        connections[id]=addr
-        status[id]=True
-        memory[addr]={"buffer":[],"conn_obj":"","id":id,"thread":thread(target=client_thread,args=(id,))}
-        memory[addr]["conn_obj"]=connection_class(addr)
-        memory[addr]["thread"].start()
-        thread(target=client_handler,args=(memory[addr]["conn_obj"],)).start()
-        send(make_msg(json.dumps({"event":"ping","data":"ping"})).encode(),addr)
-    elif addr in connections.values():
-        memory[addr]["buffer"].append(json.dumps(data))
-
-def recvr_thread(client_handler):
-    global connections,memory,temp_mem
-    while True:
-        try:
-            data,addr=server.recvfrom(9216)
-        except:
-            continue
-        if addr not in temp_mem:
-            temp_mem[addr]=b""
-        temp_mem[addr]+=data
-        if len(data)>=9216:
-            msg_processor(data[:9216],addr,client_handler)
-            temp_mem[addr]=temp_mem[addr][9216:]
-
-def writer():
-    global readable_buffer
-    while True:
-        time.sleep(0.01)
-        for x in readable_buffer.copy():
-            try:
-                _key_=x
-                x=readable_buffer[x]
-                if x["write"]!=[]:
-                    try:
-                        reliable_send(connections[_key_],x["write"][0])
-                    except:
-                        logging.exception("Error caught");traceback.print_exc()
-                    del readable_buffer[_key_]["write"][0]
-            except:
-                logging.exception("Error caught");traceback.print_exc()
-
-def connection(addr):
-    if addr in memory:
-        return memory[addr]["conn_obj"]
-    else:
-        if str(get_connection(addr))==str(False):
-            return False
-        return memory[addr]["conn_obj"]
-
-class msg:
-    def __init__(self,event,data,uid) -> None:
-        self.event=event
-        self.data=data
-        self.uid=uid
-
-def connection_listener(conn):
-    while True:
-        data=conn.recv(json_=False)
-        conn.free=False
-        if data==False:
-            return
-        try:
-            data=json.loads(data)
-            if type(data)==type({}) and "event" in data and "data" in data and "uid" in data:
-                if data["event"] in conn.events:
-                    _data_=conn.events["on_recv"](msg(data["event"],data["data"],data["uid"]))
-                    if _data_!=None and _data_!=False:
-                        if debug_mode:
-                            print(f"Conman: Triggering Event {data['event']}")
-                        conn.events[data["event"]](_data_,conn)
-            conn.free=True
-        except:
-            logging.exception("Error caught");traceback.print_exc()
-            conn.temp={}
-            conn.free=True
-            continue
-
-class connection_class:
-    def __init__(self,addr):
-        self.id=get_connection(addr)
-        self.events={"close":lambda x:print("Client with id",x.id,"Disconnected"),"on_recv":lambda x:x}
-        self.temp={}
-        self.last_activity=time.time()
-        self.free=True
-        if str(self.id)==str(False):
-            raise Exception("Connection Closed")
-        thread(target=connection_listener,args=(self,)).start()
-    def send(self,event,data,uid=None):
-        global readable_buffer
-        if self.id not in connections:
-            self.close()
-        if uid==None:
-            uid=str(uuid.uuid4())
-        if type(data) in [type(""),type([]),type(1),type(1.0),type({})]:
+def keys_exist(data,keys):
+    for x in keys:
+        if x in data:
             pass
         else:
             return False
-        data=json.dumps({"event":event,"data":data,"uid":uid})
-        if self.id not in readable_buffer:
-            readable_buffer[self.id]={"read":[],"write":[]}
-        readable_buffer[self.id]["write"].append(data)
-        while data in readable_buffer[self.id]:
-            time.sleep(0.01)
-        return
-    def recv(self,json_=True):
-        time.sleep(0.001)
-        global readable_buffer
-        if self.id not in connections:
-            self.close()
-        while True:
-            try:
-                while readable_buffer[self.id]["read"]==[]:
-                    time.sleep(0.01)
-                    pass
-            except:
-                logging.exception("Error caught");traceback.print_exc()
-                self.close()
-            res=readable_buffer[self.id]["read"][0]
-            del readable_buffer[self.id]["read"][0]
-            self.last_activity=time.time()
-            if json_:
-                res_=dict_able(res)
-                if res_[0]:
-                    try:
-                        if debug_mode:
-                            print(f"Conman: JSON {self.id} Returned")
-                        return msg(res_[1]["event"],res_[1]["data"],res_[1]["uid"])
-                    except:
-                        if debug_mode:
-                            print(f"Conman: Not Valid JSON {self.id} Continued")
-                        continue
-            else:
-                if debug_mode:
-                    print(f"Conman: Not JSON {self.id} Returned")
-                return res
-    def link_event(self,event,func):
-        self.last_activity=time.time()
-        if self.id not in connections:
-            return False
-        self.events[event]=func
-    def unlink_event(self,event,func):
-        self.last_activity=time.time()
-        if self.id not in connections:
-            return False
+    return True
+
+def unpackage_data(data):
+    return data.strip(b" ")
+
+def is_json(data):
+    try:
+        json_data=json.loads(data)
+        return type(json_data)==type({}),json_data
+    except:
+        return False,False
+
+def on_disconnect(addr):
+    print('gaya',addr)
+    global connections
+    del connections[addr]
+
+def pinger():
+    while True:
+        time.sleep(0.25)
+        for x in list(connections.keys()):
+            server.sendto(package_event_data("ping",1),x)
+
+def reliable_send(addr,data):
+    data=data_splitter(data,62527)
+    id=get_id()
+    connections[addr]["acks"][id]=[]
+    server.sendto(package_event_data('transmission_request',{'packets':len(data),'id':id}),addr)
+    start=time.time()
+    while True:
+        time.sleep(0.01)
         try:
-            del self.events[event]
+            if -1 in connections[addr]["acks"][id]:
+                break
+            else:
+                server.sendto(package_event_data('transmission_request',{'packets':len(data),'id':id}),addr)
         except:
-            return False
-    def close(self):
-        self.last_activity=time.time()
-        globals()["close"](self.id,True)
-        self.events["close"](self)
-        raise Exception("Connection Closed")
+            return
+    print(time.time()-start)
+    start=time.time()
+    while True:
+        time.sleep(0.01)
+        to_break=True
+        for x in range(len(data)):
+            try:
+                if x not in connections[addr]["acks"][id]:
+                    to_break=False
+                    server.sendto(package_event_data('data_transmission',{'id':id,'index':x,'data':data[x]}),addr)
+            except:
+                return
+        if to_break:
+            break
+    print(time.time()-start)
 
-def close(id,del_=False):
-    global status
-    status[id]=False
-    if del_:
-        del status[id]
+def writer():
+    while True:
+        time.sleep(0.01)
+        try:
+            for x in connections:
+                try:
+                    addr=x
+                    x=connections[x]
+                    if x["write"]!=[]:
+                        reliable_send(addr,x["write"][0])
+                        del connections[addr]["write"][0]
+                except:
+                    pass
+        except:
+            continue
 
-def get_connection(addr:tuple):
-    if addr in memory:
-        return memory[addr]["id"]
-    send(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
-    for x in range(30):
-        if addr in memory:
-            return memory[addr]["id"]
-        time.sleep(0.1)
-        send(make_msg(json.dumps({"event":"sync","data":""})).encode(),addr)
-    return False
+def client_thread(addr,client_func):
+    print(addr,"aaya")
+    client_func(addr)
+    global connections
+    transfer_mode=False
+    current_id=0
+    last_id=0
+    data_pool=[]
+    start=0
+    while True:
+        iters=0
+        while True:
+            time.sleep(0.001)
+            msg=""
+            try:
+                if iters>100:
+                    raise Exception("Connection timed out")
+                elif connections[addr]["read"]==[]:
+                    iters+=1
+                else:
+                    msg=connections[addr]["read"][0]
+                    del connections[addr]["read"][0]
+                    break
+            except:
+                on_disconnect(addr)
+                return
+        event,data=msg["event"],msg["data"]
+        if event=="transmission_request" and keys_exist(data,["packets","id"]):
+            if transfer_mode==False:
+                last_id=current_id
+                current_id=data["id"]
+                data_pool=[""]*data["packets"]
+                transfer_mode=True
+                start=time.time()
+                server.sendto(package_event_data('ack',{'id':current_id,'index':-1}),addr)
+            elif transfer_mode and current_id==data["id"]:
+                server.sendto(package_event_data('ack',{'id':current_id,'index':-1}),addr)
+        elif transfer_mode and event=="data_transmission" and keys_exist(data,["index","id","data"]):
+            if data["id"]==current_id:
+                data_pool[data["index"]]=data["data"]
+                server.sendto(package_event_data('ack',{'id':current_id,'index':data["index"]}),addr)
+                if "" not in data_pool:
+                    transfer_mode=False
+                    connections[addr]["out"].append("".join(data_pool))
+                    print(len("".join(data_pool)))
+                    print(time.time()-start)
+                    data_pool=[]
+            else:
+                server.sendto(package_event_data('ack',{'id':current_id,'index':data["index"]}),addr)
+        elif event=="ping":
+            pass
+        elif event=="ack" and keys_exist(data,["id","index"]):
+            if data["id"] not in connections[addr]["acks"]:
+                connections[addr]["acks"][data["id"]]=[]
+            connections[addr]["acks"][data["id"]].append(data["index"])
 
-def clear_buffer(id,read=True,write=True):
-    global readable_buffer
-    if id in readable_buffer:
-        readable_buffer[id]={"read":[] if read else readable_buffer[id]["read"],"write":[] if write else readable_buffer[id]["write"],"connected":True}
-
-def node(addr,client_handler):
-    global server
-    server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+def node(addr,client_func):
+    global connections
+    threading.Thread(target=pinger).start()
+    threading.Thread(target=writer).start()
     server.bind(addr)
-    thread(target=recvr_thread,args=(client_handler,)).start()
-    thread(target=writer).start()
-if __name__=="__main__":
-    node(("0.0.0.0",port),lambda x:print("Client with",x.id,"has Connected"))
+    while True:
+        try:
+            msg,addr=server.recvfrom(63527)
+        except Exception as e:
+            continue
+        if len(msg)!=63527:
+            continue
+        msg=unpackage_data(msg)
+        msg_dict=is_json(msg)
+        if msg==b"connection_request" and addr not in connections:
+            connections[addr]={"read":[],"write":[],"acks":{},"out":[]}
+            server.sendto(package_data("connection_establish"),addr)
+            threading.Thread(target=client_thread,args=(addr,client_func)).start()
+        elif msg==b"connection_establish" and addr not in connections:
+            connections[addr]={"read":[],"write":[],"acks":{},"out":[]}
+            threading.Thread(target=client_thread,args=(addr,client_func)).start()
+        elif addr in connections and msg_dict[0]:
+            msg_dict=msg_dict[1]
+            if keys_exist(msg_dict,["event","data"]):
+                connections[addr]["read"].append(msg_dict)
+threading.Thread(target=node,args=(("0.0.0.0",int(sys.argv[1])),lambda x:x)).start()
+while True:
+    raw_msg=input(">> ")
+    if raw_msg=="add":
+        send_to=("127.0.0.1",int(input("Port : >> ")))
+        server.sendto(package_data(b"connection_request"),send_to)
+    else:
+        reliable_send(("127.0.0.1",int(input("Port : >> "))),eval(raw_msg))
